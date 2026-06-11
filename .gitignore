@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Environment
+.env
+
+# Data artifacts: track layer directories, never contents
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# Private planning docs — never published
+docs/
+
+# OS
+.DS_Store
