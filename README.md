@@ -25,6 +25,17 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   idempotent and bronze is always reloadable from source. Each run also exports the
   table to Parquet and regenerates a profiled
   [data dictionary](reports/data_dictionary.md) from the live warehouse.
+- **Validation** — silver layer built from bronze under runtime data contracts
+  ([Pandera](https://pandera.readthedocs.io/)). Cleaning rules remove only *known* dirt
+  and account for every dropped row — the workbook's inter-sheet export overlap is
+  deduplicated and anonymous rows are dropped; cancellations stay as negative line items
+  and service codes (postage, fees, adjustments) are flagged out of revenue rather than
+  deleted. A strict contract (types, nulls, value ranges, and business rules like
+  `line_revenue = quantity × unit_price` and cancellation/quantity consistency) then
+  validates the entire candidate table; any surprise violation aborts the build before
+  anything is written. Every run regenerates a
+  [data quality report](reports/data_quality.md) with the row-loss waterfall, excluded
+  codes, and the enforced contract.
 
 ## Setup
 
@@ -51,6 +62,14 @@ uv run python scripts/ingest.py
 
 This builds `bronze.transactions` in `data/warehouse.duckdb`, exports
 `data/bronze/transactions.parquet`, and regenerates `reports/data_dictionary.md`.
+
+```sh
+uv run python scripts/build_silver.py
+```
+
+This validates bronze, builds `silver.transactions` (cleaned, deduplicated, contract-
+enforced), exports `data/silver/transactions.parquet`, and regenerates
+`reports/data_quality.md` and the data dictionary.
 
 ## Development
 

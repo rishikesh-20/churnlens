@@ -25,17 +25,16 @@ import duckdb
 import pandas as pd
 
 from churnlens.config.settings import Settings
+from churnlens.io.data_dictionary import SOURCE_URL, write_data_dictionary
 from churnlens.io.warehouse import warehouse_connection
 
 logger = logging.getLogger(__name__)
 
-SOURCE_URL = "https://archive.ics.uci.edu/dataset/502/online+retail+ii"
 SOURCE_FILENAME = "online_retail_II.xlsx"
 SOURCE_SHEETS = ("Year 2009-2010", "Year 2010-2011")
 
 BRONZE_TABLE = "bronze.transactions"
 PARQUET_FILENAME = "transactions.parquet"
-DATA_DICTIONARY_FILENAME = "data_dictionary.md"
 
 # Source column -> bronze column (DATA_MODEL.md: bronze.transactions).
 _COLUMN_MAP = {
@@ -52,20 +51,6 @@ _COLUMN_MAP = {
 # Text columns are read as text so source values survive verbatim —
 # notably the 'C' cancellation prefix on invoice numbers.
 _SOURCE_TEXT_COLUMNS = ["Invoice", "StockCode", "Description", "Country"]
-
-_COLUMN_DESCRIPTIONS = {
-    "invoice": "Invoice number (text); prefixed 'C' for cancellations.",
-    "stock_code": "Product (item) code.",
-    "description": "Product name; null on some non-product rows.",
-    "quantity": "Units on the invoice line; negative for cancellations.",
-    "invoice_date": "Invoice timestamp.",
-    "unit_price": "Price per unit in GBP.",
-    "customer_id": "Customer identifier; null for unregistered (anonymous) sales.",
-    "country": "Customer's country of residence.",
-    "source_file": "Lineage: source workbook file name.",
-    "source_sheet": "Lineage: workbook sheet the row was read from.",
-    "loaded_at": "Lineage: UTC timestamp of the load run.",
-}
 
 
 @dataclass(frozen=True)
@@ -156,60 +141,6 @@ def export_bronze_parquet(con: duckdb.DuckDBPyConnection, bronze_dir: Path) -> P
     con.execute(f"COPY {BRONZE_TABLE} TO '{parquet_path}' (FORMAT PARQUET)")
     logger.info("Exported %s to %s", BRONZE_TABLE, parquet_path)
     return parquet_path
-
-
-def write_data_dictionary(con: duckdb.DuckDBPyConnection, reports_dir: Path) -> Path:
-    """Generate the bronze data dictionary from the live table."""
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    dictionary_path = reports_dir / DATA_DICTIONARY_FILENAME
-
-    rows = _row_count(con)
-    columns = con.execute(
-        """
-        SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_schema = 'bronze' AND table_name = 'transactions'
-        ORDER BY ordinal_position
-        """
-    ).fetchall()
-
-    lines = [
-        "# Data Dictionary",
-        "",
-        "Generated from the live warehouse on every ingestion run — do not edit by hand.",
-        "",
-        f"## `{BRONZE_TABLE}`",
-        "",
-        "Raw Online Retail II invoice lines, exactly as in the source workbook "
-        f"([UCI 502]({SOURCE_URL})). One row per invoice line; no cleaning or filtering.",
-        "",
-        f"**Rows:** {rows:,}",
-        "",
-        "| Column | Type | Nulls | Distinct | Min | Max | Description |",
-        "|--------|------|-------|----------|-----|-----|-------------|",
-    ]
-    for name, data_type in columns:
-        stats = con.execute(
-            f"""
-            SELECT
-                COUNT(*) - COUNT({name}),
-                COUNT(DISTINCT {name}),
-                MIN({name})::VARCHAR,
-                MAX({name})::VARCHAR
-            FROM {BRONZE_TABLE}
-            """
-        ).fetchone()
-        assert stats is not None
-        nulls, distinct, min_val, max_val = stats
-        description = _COLUMN_DESCRIPTIONS.get(name, "")
-        lines.append(
-            f"| `{name}` | {data_type} | {nulls:,} | {distinct:,} "
-            f"| {min_val} | {max_val} | {description} |"
-        )
-
-    dictionary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    logger.info("Wrote data dictionary to %s", dictionary_path)
-    return dictionary_path
 
 
 def ingest_bronze(settings: Settings) -> IngestionResult:
