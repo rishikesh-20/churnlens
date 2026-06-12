@@ -18,6 +18,13 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   pipeline component takes an explicit `as_of_date` cutoff and may only read data from
   strictly before it, making point-in-time correctness testable and every pipeline run
   idempotently reproducible.
+- **Ingestion** — bronze layer of a medallion warehouse on DuckDB (one file, one SQL
+  schema per layer). Online Retail II loads as an exact, immutable copy of the source —
+  no cleaning or filtering, snake_case names and lineage columns (`source_file`,
+  `source_sheet`, `loaded_at`) only. The load is a full atomic replace, so ingestion is
+  idempotent and bronze is always reloadable from source. Each run also exports the
+  table to Parquet and regenerates a profiled
+  [data dictionary](reports/data_dictionary.md) from the live warehouse.
 
 ## Setup
 
@@ -31,6 +38,20 @@ cp .env.example .env          # optional local overrides
 uv run pre-commit install     # enable git hooks
 ```
 
+## Data
+
+The dataset is [Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+(UCI ML Repository): ~1M invoice lines from a UK online retailer, Dec 2009 – Dec 2011.
+It is not committed to the repo — download the zip from UCI and place the extracted
+workbook at `data/raw/online_retail_II.xlsx`, then:
+
+```sh
+uv run python scripts/ingest.py
+```
+
+This builds `bronze.transactions` in `data/warehouse.duckdb`, exports
+`data/bronze/transactions.parquet`, and regenerates `reports/data_dictionary.md`.
+
 ## Development
 
 ```sh
@@ -43,7 +64,9 @@ uv run mypy src/              # type check
 ## Layout
 
 ```
-data/{bronze,silver,gold}/   medallion data layers (contents gitignored)
+data/raw/                    source dataset (manual download, gitignored)
+data/warehouse.duckdb        DuckDB warehouse: bronze/silver/gold schemas (gitignored)
+data/{bronze,silver,gold}/   per-layer Parquet exports (contents gitignored)
 airflow/                     orchestration
 frontend/                    operations dashboard
 reports/                     generated reports

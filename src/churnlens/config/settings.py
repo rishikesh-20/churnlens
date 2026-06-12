@@ -28,10 +28,20 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     data_dir: Path = _REPO_ROOT / "data"
+    reports_dir: Path = _REPO_ROOT / "reports"
 
     # D2: a customer is churned if no purchase occurs within this window
     # after the snapshot date.
     churn_window_days: int = 90
+
+    @property
+    def raw_dir(self) -> Path:
+        return self.data_dir / "raw"
+
+    @property
+    def duckdb_path(self) -> Path:
+        # D20: one warehouse file, one SQL schema per medallion layer.
+        return self.data_dir / "warehouse.duckdb"
 
     @property
     def bronze_dir(self) -> Path:
