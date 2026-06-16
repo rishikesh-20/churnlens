@@ -28,10 +28,25 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     data_dir: Path = _REPO_ROOT / "data"
+    reports_dir: Path = _REPO_ROOT / "reports"
 
     # D2: a customer is churned if no purchase occurs within this window
-    # after the snapshot date.
+    # after the snapshot date. Also the revenue-at-risk horizon (D6).
     churn_window_days: int = 90
+
+    # D6: revenue run rate uses trailing-12-month net revenue. Customers with
+    # at least this much history use the trailing window; shorter-history
+    # customers fall back to a full-history rate.
+    revenue_run_rate_window_days: int = 365
+
+    @property
+    def raw_dir(self) -> Path:
+        return self.data_dir / "raw"
+
+    @property
+    def duckdb_path(self) -> Path:
+        # D20: one warehouse file, one SQL schema per medallion layer.
+        return self.data_dir / "warehouse.duckdb"
 
     @property
     def bronze_dir(self) -> Path:

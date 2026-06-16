@@ -18,6 +18,34 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   pipeline component takes an explicit `as_of_date` cutoff and may only read data from
   strictly before it, making point-in-time correctness testable and every pipeline run
   idempotently reproducible.
+- **Ingestion** — bronze layer of a medallion warehouse on DuckDB (one file, one SQL
+  schema per layer). Online Retail II loads as an exact, immutable copy of the source —
+  no cleaning or filtering, snake_case names and lineage columns (`source_file`,
+  `source_sheet`, `loaded_at`) only. The load is a full atomic replace, so ingestion is
+  idempotent and bronze is always reloadable from source. Each run also exports the
+  table to Parquet and regenerates a profiled
+  [data dictionary](reports/data_dictionary.md) from the live warehouse.
+- **Validation** — silver layer built from bronze under runtime data contracts
+  ([Pandera](https://pandera.readthedocs.io/)). Cleaning rules remove only *known* dirt
+  and account for every dropped row — the workbook's inter-sheet export overlap is
+  deduplicated and anonymous rows are dropped; cancellations stay as negative line items
+  and service codes (postage, fees, adjustments) are flagged out of revenue rather than
+  deleted. A strict contract (types, nulls, value ranges, and business rules like
+  `line_revenue = quantity × unit_price` and cancellation/quantity consistency) then
+  validates the entire candidate table; any surprise violation aborts the build before
+  anything is written. Every run regenerates a
+  [data quality report](reports/data_quality.md) with the row-loss waterfall, excluded
+  codes, and the enforced contract.
+- **Customer360** — gold-layer customer analytics mart, the first layer above the
+  simulated clock. For a given `as_of_date` it aggregates silver history *strictly before*
+  the cutoff into one row per customer: recency and tenure, order and return counts,
+  net-product revenue, a 90-day revenue run rate, and country — every metric anchored on
+  the passed date, never the latest data, so the table cannot read the future. The build
+  is an idempotent per-slice upsert, so replaying snapshots accumulates a
+  `(customer, as_of_date)` panel that later phases label and turn into features; a strict
+  Pandera contract validates each slice before it is written, and every run regenerates a
+  [Customer360 profile](reports/customer_360.md). Anti-leakage is asserted by tests (a row
+  timestamped at the exact cutoff is excluded; post-cutoff rows never change a metric).
 
 ## Setup
 
@@ -31,6 +59,36 @@ cp .env.example .env          # optional local overrides
 uv run pre-commit install     # enable git hooks
 ```
 
+## Data
+
+The dataset is [Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+(UCI ML Repository): ~1M invoice lines from a UK online retailer, Dec 2009 – Dec 2011.
+It is not committed to the repo — download the zip from UCI and place the extracted
+workbook at `data/raw/online_retail_II.xlsx`, then:
+
+```sh
+uv run python scripts/ingest.py
+```
+
+This builds `bronze.transactions` in `data/warehouse.duckdb`, exports
+`data/bronze/transactions.parquet`, and regenerates `reports/data_dictionary.md`.
+
+```sh
+uv run python scripts/build_silver.py
+```
+
+This validates bronze, builds `silver.transactions` (cleaned, deduplicated, contract-
+enforced), exports `data/silver/transactions.parquet`, and regenerates
+`reports/data_quality.md` and the data dictionary.
+
+```sh
+uv run python scripts/build_customer360.py 2011-03-01
+```
+
+This builds the `gold.customer_360` slice for the given cutoff date (one row per customer,
+point-in-time), upserts it into the panel, exports `data/gold/customer_360.parquet`, and
+regenerates `reports/customer_360.md` and the data dictionary.
+
 ## Development
 
 ```sh
@@ -43,7 +101,9 @@ uv run mypy src/              # type check
 ## Layout
 
 ```
-data/{bronze,silver,gold}/   medallion data layers (contents gitignored)
+data/raw/                    source dataset (manual download, gitignored)
+data/warehouse.duckdb        DuckDB warehouse: bronze/silver/gold schemas (gitignored)
+data/{bronze,silver,gold}/   per-layer Parquet exports (contents gitignored)
 airflow/                     orchestration
 frontend/                    operations dashboard
 reports/                     generated reports
