@@ -31,8 +31,13 @@ class Settings(BaseSettings):
     reports_dir: Path = _REPO_ROOT / "reports"
 
     # D2: a customer is churned if no purchase occurs within this window
-    # after the snapshot date.
+    # after the snapshot date. Also the revenue-at-risk horizon (D6).
     churn_window_days: int = 90
+
+    # D6: revenue run rate uses trailing-12-month net revenue. Customers with
+    # at least this much history use the trailing window; shorter-history
+    # customers fall back to a full-history rate.
+    revenue_run_rate_window_days: int = 365
 
     @property
     def raw_dir(self) -> Path:

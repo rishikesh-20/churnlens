@@ -36,6 +36,16 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   anything is written. Every run regenerates a
   [data quality report](reports/data_quality.md) with the row-loss waterfall, excluded
   codes, and the enforced contract.
+- **Customer360** — gold-layer customer analytics mart, the first layer above the
+  simulated clock. For a given `as_of_date` it aggregates silver history *strictly before*
+  the cutoff into one row per customer: recency and tenure, order and return counts,
+  net-product revenue, a 90-day revenue run rate, and country — every metric anchored on
+  the passed date, never the latest data, so the table cannot read the future. The build
+  is an idempotent per-slice upsert, so replaying snapshots accumulates a
+  `(customer, as_of_date)` panel that later phases label and turn into features; a strict
+  Pandera contract validates each slice before it is written, and every run regenerates a
+  [Customer360 profile](reports/customer_360.md). Anti-leakage is asserted by tests (a row
+  timestamped at the exact cutoff is excluded; post-cutoff rows never change a metric).
 
 ## Setup
 
@@ -70,6 +80,14 @@ uv run python scripts/build_silver.py
 This validates bronze, builds `silver.transactions` (cleaned, deduplicated, contract-
 enforced), exports `data/silver/transactions.parquet`, and regenerates
 `reports/data_quality.md` and the data dictionary.
+
+```sh
+uv run python scripts/build_customer360.py 2011-03-01
+```
+
+This builds the `gold.customer_360` slice for the given cutoff date (one row per customer,
+point-in-time), upserts it into the panel, exports `data/gold/customer_360.parquet`, and
+regenerates `reports/customer_360.md` and the data dictionary.
 
 ## Development
 

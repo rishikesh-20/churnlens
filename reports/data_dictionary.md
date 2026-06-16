@@ -44,3 +44,26 @@ Cleaned invoice lines: inter-sheet duplicate copies and anonymous rows removed, 
 | `source_file` | VARCHAR | 0 | 1 | online_retail_II.xlsx | online_retail_II.xlsx | Lineage: source workbook file name. |
 | `source_sheet` | VARCHAR | 0 | 2 | Year 2009-2010 | Year 2010-2011 | Lineage: workbook sheet the row was read from. |
 | `loaded_at` | TIMESTAMP | 0 | 1 | 2026-06-12 03:07:23.101187 | 2026-06-12 03:07:23.101187 | Lineage: UTC timestamp of the bronze load run. |
+
+## `gold.customer_360`
+
+Point-in-time customer analytics mart: one row per customer per `as_of_date`, aggregated from silver history strictly before the cutoff (D18). Durable facts only (recency/tenure, order and return counts, net-product revenue, the D6 run rate, most-recent country); a single-date slice is profiled in [customer_360.md](customer_360.md).
+
+**Rows:** 4,607
+
+| Column | Type | Nulls | Distinct | Min | Max | Description |
+|--------|------|-------|----------|-----|-----|-------------|
+| `customer_id` | VARCHAR | 0 | 4,607 | 12346 | 18287 | Customer identifier. |
+| `as_of_date` | DATE | 0 | 1 | 2011-03-01 | 2011-03-01 | Point-in-time cutoff; metrics use only history strictly before it (D18). |
+| `first_purchase_date` | DATE | 0 | 362 | 2009-12-01 | 2011-02-28 | Date of the customer's first line (tenure anchor). |
+| `last_activity_date` | DATE | 0 | 360 | 2009-12-01 | 2011-02-28 | Date of the most recent line of any kind; cancellations count as activity (D11). Drives recency. |
+| `last_purchase_date` | DATE | 95 | 359 | 2009-12-01 | 2011-02-28 | Date of the most recent product purchase (positive quantity); null if the customer has only cancellations so far. |
+| `recency_days` | INTEGER | 0 | 360 | 1 | 455 | as_of_date minus last_activity_date, in days. |
+| `tenure_days` | INTEGER | 0 | 362 | 1 | 455 | as_of_date minus first_purchase_date, in days. |
+| `order_count` | INTEGER | 0 | 71 | 0 | 220 | Distinct non-cancellation invoices. |
+| `cancelled_order_count` | INTEGER | 0 | 30 | 0 | 70 | Distinct cancellation ('C') invoices. |
+| `total_net_revenue` | DOUBLE | 0 | 4,492 | -1663.0600000000002 | 357121.43 | Net product revenue to date in GBP (cancellations net out; non-product codes excluded, D11). May be negative. |
+| `trailing_12m_net_revenue` | DOUBLE | 0 | 4,244 | -811.8600000000001 | 254836.99 | Net product revenue in the trailing 12 months before the cutoff, feeding the D6 run rate. |
+| `cancelled_revenue` | DOUBLE | 0 | 1,399 | -77621.14 | 0.0 | Net revenue of cancellation lines in GBP (≤ 0). |
+| `run_rate_90d` | DOUBLE | 0 | 4,268 | -200.1846575342466 | 62836.518082191775 | Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or a full-history rate floored at the churn window for <12mo customers. |
+| `country` | VARCHAR | 0 | 40 | Australia | West Indies | Country on the customer's most recent invoice before the cutoff. |

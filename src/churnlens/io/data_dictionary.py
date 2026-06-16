@@ -30,6 +30,13 @@ _TABLE_DESCRIPTIONS = {
         "before the table is written; row losses are accounted in "
         "[data_quality.md](data_quality.md)."
     ),
+    "gold.customer_360": (
+        "Point-in-time customer analytics mart: one row per customer per `as_of_date`, "
+        "aggregated from silver history strictly before the cutoff (D18). Durable facts "
+        "only (recency/tenure, order and return counts, net-product revenue, the D6 run "
+        "rate, most-recent country); a single-date slice is profiled in "
+        "[customer_360.md](customer_360.md)."
+    ),
 }
 
 _SHARED_COLUMNS = {
@@ -58,6 +65,27 @@ _COLUMN_DESCRIPTIONS = {
         "is_cancellation": "True when the invoice is a cancellation ('C' prefix).",
         "is_product": "True for merchandise stock codes; False for service/adjustment "
         "codes (postage, fees, manual adjustments) excluded from revenue.",
+    },
+    "gold.customer_360": {
+        "customer_id": "Customer identifier.",
+        "as_of_date": "Point-in-time cutoff; metrics use only history strictly before it (D18).",
+        "first_purchase_date": "Date of the customer's first line (tenure anchor).",
+        "last_activity_date": "Date of the most recent line of any kind; cancellations count "
+        "as activity (D11). Drives recency.",
+        "last_purchase_date": "Date of the most recent product purchase (positive quantity); "
+        "null if the customer has only cancellations so far.",
+        "recency_days": "as_of_date minus last_activity_date, in days.",
+        "tenure_days": "as_of_date minus first_purchase_date, in days.",
+        "order_count": "Distinct non-cancellation invoices.",
+        "cancelled_order_count": "Distinct cancellation ('C') invoices.",
+        "total_net_revenue": "Net product revenue to date in GBP (cancellations net out; "
+        "non-product codes excluded, D11). May be negative.",
+        "trailing_12m_net_revenue": "Net product revenue in the trailing 12 months before the "
+        "cutoff, feeding the D6 run rate.",
+        "cancelled_revenue": "Net revenue of cancellation lines in GBP (≤ 0).",
+        "run_rate_90d": "Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or "
+        "a full-history rate floored at the churn window for <12mo customers.",
+        "country": "Country on the customer's most recent invoice before the cutoff.",
     },
 }
 

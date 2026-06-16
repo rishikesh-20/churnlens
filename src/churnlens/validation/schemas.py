@@ -88,3 +88,42 @@ class SilverTransactions(pa.DataFrameModel):
     def product_iff_structural_code(cls, df: pd.DataFrame) -> Series[bool]:
         structural = df["stock_code"].str.fullmatch(PRODUCT_STOCK_CODE_PATTERN)
         return cast("Series[bool]", df["is_product"] == structural)
+
+
+class Customer360(pa.DataFrameModel):
+    """Output contract for ``gold.customer_360``: one row per customer, point-in-time (D18).
+
+    Validated on the candidate slice for a single ``as_of_date`` before it is
+    written, so ``customer_id`` is unique here. Anti-leakage is enforced by the
+    aggregation SQL (history strictly before the cutoff) and proven by tests;
+    this contract guards the resulting facts' internal consistency.
+    """
+
+    customer_id: Series[str] = pa.Field(str_matches=CUSTOMER_ID_PATTERN, unique=True)
+    as_of_date: Series[pa.DateTime]
+    first_purchase_date: Series[pa.DateTime]
+    last_activity_date: Series[pa.DateTime]
+    # Null for customers whose only pre-cutoff activity is a cancellation.
+    last_purchase_date: Series[pa.DateTime] = pa.Field(nullable=True)
+    recency_days: Series[int] = pa.Field(ge=0)
+    tenure_days: Series[int] = pa.Field(ge=0)
+    order_count: Series[int] = pa.Field(ge=0)
+    cancelled_order_count: Series[int] = pa.Field(ge=0)
+    # Revenue is net of product cancellations and may be negative (pure returns).
+    total_net_revenue: Series[float]
+    trailing_12m_net_revenue: Series[float]
+    cancelled_revenue: Series[float] = pa.Field(le=0)
+    run_rate_90d: Series[float]
+    country: Series[str]
+
+    class Config:
+        strict = True
+        coerce = True
+
+    @pa.dataframe_check(error="recency_days must not exceed tenure_days")
+    def recency_within_tenure(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast("Series[bool]", df["recency_days"] <= df["tenure_days"])
+
+    @pa.dataframe_check(error="first_purchase_date must not exceed last_activity_date")
+    def first_before_last_activity(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast("Series[bool]", df["first_purchase_date"] <= df["last_activity_date"])
