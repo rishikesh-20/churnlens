@@ -46,6 +46,19 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   Pandera contract validates each slice before it is written, and every run regenerates a
   [Customer360 profile](reports/customer_360.md). Anti-leakage is asserted by tests (a row
   timestamped at the exact cutoff is excluded; post-cutoff rows never change a metric).
+- **Labeling** — the supervised churn target (`gold.labels`), one row per customer per
+  monthly snapshot over the active population (recency ≤ 90 days, read from Customer360).
+  A customer is labelled *churned* if they make no product purchase in the 90 days *after*
+  the snapshot — the platform's one deliberate look-ahead, used for the target only and
+  cleanly partitioned from features, which stay strictly before the snapshot. Snapshots
+  whose 90-day window runs past the end of observed data are *censored* (event-aware: a
+  purchase already seen settles the outcome; otherwise it is unknowable and held out of
+  training). The build is an idempotent per-snapshot upsert, so a rolling monthly schedule
+  accumulates a reusable training panel that also drives replay and retraining; a strict
+  Pandera contract validates each slice and every run regenerates a
+  [labels profile](reports/labels.md). Anti-leakage is asserted by tests (injecting a
+  post-snapshot purchase flips the label but changes no feature; window boundaries are
+  half-open).
 
 ## Setup
 

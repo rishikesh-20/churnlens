@@ -127,3 +127,39 @@ class Customer360(pa.DataFrameModel):
     @pa.dataframe_check(error="first_purchase_date must not exceed last_activity_date")
     def first_before_last_activity(cls, df: pd.DataFrame) -> Series[bool]:
         return cast("Series[bool]", df["first_purchase_date"] <= df["last_activity_date"])
+
+
+class Labels(pa.DataFrameModel):
+    """Output contract for ``gold.labels``: one row per active customer, point-in-time (D24).
+
+    Validated on the candidate slice for a single ``snapshot_date`` before it is
+    written, so ``customer_id`` is unique here. The forward-looking target is read
+    from silver in ``[snapshot, snapshot + 90d)`` (the only deliberate look-ahead,
+    target-only); this contract guards the resulting label's internal consistency.
+    """
+
+    customer_id: Series[str] = pa.Field(str_matches=CUSTOMER_ID_PATTERN, unique=True)
+    snapshot_date: Series[pa.DateTime]
+    # Null exactly for censored rows (window not fully observed, outcome unknowable).
+    churned: Series[pd.Int64Dtype] = pa.Field(nullable=True, isin=[0, 1])
+    censored: Series[bool]
+    # First product purchase in the window; null unless churned == 0.
+    next_purchase_date: Series[pa.DateTime] = pa.Field(nullable=True)
+
+    class Config:
+        strict = True
+        coerce = True
+
+    @pa.dataframe_check(error="churned is null exactly when censored")
+    def churned_null_iff_censored(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast("Series[bool]", df["churned"].isna() == df["censored"])
+
+    @pa.dataframe_check(error="next_purchase_date is set exactly when churned == 0")
+    def next_purchase_iff_retained(cls, df: pd.DataFrame) -> Series[bool]:
+        retained = df["churned"].eq(0).fillna(False).astype(bool)
+        return cast("Series[bool]", df["next_purchase_date"].notna() == retained)
+
+    @pa.dataframe_check(error="next_purchase_date must not precede snapshot_date")
+    def next_purchase_within_window(cls, df: pd.DataFrame) -> Series[bool]:
+        within = df["next_purchase_date"] >= df["snapshot_date"]
+        return cast("Series[bool]", within | df["next_purchase_date"].isna())

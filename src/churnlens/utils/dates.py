@@ -11,6 +11,30 @@ through ``parse_as_of_date``; code never calls ``today()``.
 from datetime import date, datetime
 
 
+def monthly_snapshots(start: str | date | datetime, end: str | date | datetime) -> list[date]:
+    """First-of-month dates from ``start``'s month through ``end``'s month, inclusive.
+
+    The rolling monthly snapshot schedule (D2/D4): each labeling snapshot is the
+    first of a month. Inputs are normalized through ``parse_as_of_date`` and
+    snapped back to the first of their month. Raises ValueError if ``end`` precedes
+    ``start``.
+    """
+    first = parse_as_of_date(start).replace(day=1)
+    last = parse_as_of_date(end).replace(day=1)
+    if last < first:
+        raise ValueError(f"end ({last}) must not precede start ({first})")
+    snapshots = []
+    current = first
+    while current <= last:
+        snapshots.append(current)
+        current = (
+            date(current.year + 1, 1, 1)
+            if current.month == 12
+            else date(current.year, current.month + 1, 1)
+        )
+    return snapshots
+
+
 def parse_as_of_date(value: str | date | datetime) -> date:
     """Normalize script/DAG input to a ``date``.
 

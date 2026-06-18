@@ -37,6 +37,14 @@ _TABLE_DESCRIPTIONS = {
         "rate, most-recent country); a single-date slice is profiled in "
         "[customer_360.md](customer_360.md)."
     ),
+    "gold.labels": (
+        "Supervised churn target: one row per active customer (D3, `recency_days ≤ 90` "
+        "from customer_360) per `snapshot_date`. `churned = 1` when no product purchase "
+        "falls in `[snapshot, snapshot + 90d)` (D2/D24); rows whose window extends past the "
+        "observed-data horizon with no purchase are censored (`churned` NULL). The forward "
+        "window is the only deliberate look-ahead — target only, never features. Profiled "
+        "in [labels.md](labels.md)."
+    ),
 }
 
 _SHARED_COLUMNS = {
@@ -86,6 +94,16 @@ _COLUMN_DESCRIPTIONS = {
         "run_rate_90d": "Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or "
         "a full-history rate floored at the churn window for <12mo customers.",
         "country": "Country on the customer's most recent invoice before the cutoff.",
+    },
+    "gold.labels": {
+        "customer_id": "Customer identifier; the D3 active population at the snapshot.",
+        "snapshot_date": "Point-in-time labeling cutoff; the forward window starts here (D18).",
+        "churned": "1 if no product purchase in [snapshot, snapshot+90d); 0 if a purchase "
+        "occurred; NULL when censored (window unobserved).",
+        "censored": "True when the 90-day window extends past the observed-data horizon and "
+        "no purchase was seen, so the outcome is unknowable (D4).",
+        "next_purchase_date": "Date of the first product purchase in the window; null unless "
+        "churned = 0.",
     },
 }
 
