@@ -59,6 +59,17 @@ monitoring with gated retraining, Slack alerting, and a React operations dashboa
   [labels profile](reports/labels.md). Anti-leakage is asserted by tests (injecting a
   post-snapshot purchase flips the label but changes no feature; window boundaries are
   half-open).
+- **Feature engineering** — the model-input table (`gold.features`), one row per customer
+  per `as_of_date`: 18 features across behavior, revenue, engagement, and time. Every
+  feature is a closed-form *per-row* transform of the Customer360 slice — no other data
+  source, no forward read, and no cross-customer statistics — so the *same* builder serves
+  training backfills and production scoring with identical values and **no
+  training-serving skew**. Undefined values (one-time buyers, never-purchased customers,
+  zero denominators) are left as NaN for the model to handle natively, never imputed. A
+  strict Pandera contract bounds the rates and scores and enforces the nullability rules;
+  every run regenerates a [features profile](reports/features.md). Anti-leakage is asserted
+  by tests (a post-cutoff purchase changes no feature value) along with feature-correctness
+  and idempotent-rebuild tests.
 
 ## Setup
 
@@ -101,6 +112,15 @@ uv run python scripts/build_customer360.py 2011-03-01
 This builds the `gold.customer_360` slice for the given cutoff date (one row per customer,
 point-in-time), upserts it into the panel, exports `data/gold/customer_360.parquet`, and
 regenerates `reports/customer_360.md` and the data dictionary.
+
+```sh
+uv run python scripts/build_features.py 2011-03-01
+```
+
+This transforms the `gold.customer_360` slice for the date into the `gold.features`
+model-input vector (the same builder used for training and scoring), upserts it, exports
+`data/gold/features.parquet`, and regenerates `reports/features.md` and the data dictionary.
+Pass `--start/--end` for a monthly backfill.
 
 ## Development
 

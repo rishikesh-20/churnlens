@@ -10,9 +10,11 @@ so the table can never read the future.
 Population is all customers with prior history (the D3 active-only filter,
 ``recency_days <= churn_window_days``, is applied downstream by Labeling).
 Metrics are durable facts only — net-product revenue totals (D11),
-the D6 revenue run rate, recency/tenure, order and return counts, and the
-most-recent country; ratios and windowed features are built on top of these
-in Phase 6.
+the D6 revenue run rate, recency/tenure, order and return counts, distinct
+active months/days, distinct products and product-line counts, gross product
+revenue, the prior-12m revenue window, the largest order's net revenue, and the
+most-recent country (D25); ratios, scores, and windowed features are built on
+top of these in Phase 6.
 
 The write is an idempotent per-slice upsert: the rows for ``as_of_date`` are
 replaced, so backfilled snapshots (D10) accumulate a ``(customer, as_of_date)``
@@ -56,6 +58,13 @@ _CREATE_TABLE_SQL = f"""
         trailing_12m_net_revenue DOUBLE,
         cancelled_revenue        DOUBLE,
         run_rate_90d             DOUBLE,
+        distinct_active_months   INTEGER,
+        distinct_active_days     INTEGER,
+        distinct_products        INTEGER,
+        product_line_count       INTEGER,
+        gross_product_revenue    DOUBLE,
+        prior_12m_net_revenue    DOUBLE,
+        max_invoice_net_revenue  DOUBLE,
         country                  VARCHAR
     )
 """
@@ -98,8 +107,34 @@ def _aggregate_sql(horizon_days: int, trailing_days: int) -> str:
                                               - INTERVAL '{trailing_days} days'
                         THEN line_revenue ELSE 0
                     END) AS trailing_12m_net_revenue,
-                SUM(CASE WHEN is_cancellation THEN line_revenue ELSE 0 END) AS cancelled_revenue
+                SUM(CASE WHEN is_cancellation THEN line_revenue ELSE 0 END) AS cancelled_revenue,
+                COUNT(DISTINCT DATE_TRUNC('month', invoice_date)) AS distinct_active_months,
+                COUNT(DISTINCT CAST(invoice_date AS DATE)) AS distinct_active_days,
+                COUNT(DISTINCT CASE WHEN is_product AND quantity > 0 THEN stock_code END)
+                    AS distinct_products,
+                COUNT(CASE WHEN is_product AND quantity > 0 THEN 1 END) AS product_line_count,
+                SUM(CASE WHEN is_product AND quantity > 0 THEN line_revenue ELSE 0 END)
+                    AS gross_product_revenue,
+                SUM(CASE
+                        WHEN is_product
+                         AND invoice_date >= CAST($as_of AS TIMESTAMP)
+                                              - INTERVAL '{2 * trailing_days} days'
+                         AND invoice_date <  CAST($as_of AS TIMESTAMP)
+                                              - INTERVAL '{trailing_days} days'
+                        THEN line_revenue ELSE 0
+                    END) AS prior_12m_net_revenue
             FROM history
+            GROUP BY customer_id
+        ),
+        invoice_rev AS (
+            SELECT customer_id, MAX(inv_net) AS max_invoice_net_revenue
+            FROM (
+                SELECT customer_id, invoice,
+                       SUM(CASE WHEN is_product THEN line_revenue ELSE 0 END) AS inv_net
+                FROM history
+                WHERE NOT is_cancellation
+                GROUP BY customer_id, invoice
+            )
             GROUP BY customer_id
         )
         SELECT
@@ -127,9 +162,17 @@ def _aggregate_sql(horizon_days: int, trailing_days: int) -> str:
                            {horizon_days}
                        ) * {horizon_days}
             END AS run_rate_90d,
+            a.distinct_active_months,
+            a.distinct_active_days,
+            a.distinct_products,
+            a.product_line_count,
+            a.gross_product_revenue,
+            a.prior_12m_net_revenue,
+            COALESCE(r.max_invoice_net_revenue, 0.0) AS max_invoice_net_revenue,
             c.country
         FROM agg a
         JOIN latest_country c USING (customer_id)
+        LEFT JOIN invoice_rev r USING (customer_id)
         ORDER BY a.customer_id
     """
 
@@ -191,6 +234,13 @@ def _upsert_slice(con: duckdb.DuckDBPyConnection, frame: pd.DataFrame, as_of: da
                 trailing_12m_net_revenue::DOUBLE,
                 cancelled_revenue::DOUBLE,
                 run_rate_90d::DOUBLE,
+                distinct_active_months::INTEGER,
+                distinct_active_days::INTEGER,
+                distinct_products::INTEGER,
+                product_line_count::INTEGER,
+                gross_product_revenue::DOUBLE,
+                prior_12m_net_revenue::DOUBLE,
+                max_invoice_net_revenue::DOUBLE,
                 country::VARCHAR
             FROM c360_frame
             """

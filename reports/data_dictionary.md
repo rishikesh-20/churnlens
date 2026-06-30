@@ -62,11 +62,47 @@ Point-in-time customer analytics mart: one row per customer per `as_of_date`, ag
 | `tenure_days` | INTEGER | 0 | 689 | 1 | 700 | as_of_date minus first_purchase_date, in days. |
 | `order_count` | INTEGER | 0 | 184 | 0 | 355 | Distinct non-cancellation invoices. |
 | `cancelled_order_count` | INTEGER | 0 | 74 | 0 | 105 | Distinct cancellation ('C') invoices. |
-| `total_net_revenue` | DOUBLE | 0 | 30,615 | -1663.0600000000002 | 551592.02 | Net product revenue to date in GBP (cancellations net out; non-product codes excluded, D11). May be negative. |
-| `trailing_12m_net_revenue` | DOUBLE | 0 | 34,213 | -9854.030000000002 | 318751.33999999997 | Net product revenue in the trailing 12 months before the cutoff, feeding the D6 run rate. |
-| `cancelled_revenue` | DOUBLE | 0 | 4,801 | -77621.14000000001 | 0.0 | Net revenue of cancellation lines in GBP (≤ 0). |
-| `run_rate_90d` | DOUBLE | 0 | 63,189 | -2429.7608219178087 | 102284.44 | Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or a full-history rate floored at the churn window for <12mo customers. |
+| `total_net_revenue` | DOUBLE | 0 | 30,534 | -1663.0600000000002 | 551592.0200000001 | Net product revenue to date in GBP (cancellations net out; non-product codes excluded, D11). May be negative. |
+| `trailing_12m_net_revenue` | DOUBLE | 0 | 34,224 | -9854.030000000002 | 318751.33999999997 | Net product revenue in the trailing 12 months before the cutoff, feeding the D6 run rate. |
+| `cancelled_revenue` | DOUBLE | 0 | 4,797 | -77621.14000000001 | 0.0 | Net revenue of cancellation lines in GBP (≤ 0). |
+| `run_rate_90d` | DOUBLE | 0 | 63,113 | -2429.7608219178087 | 102284.44 | Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or a full-history rate floored at the churn window for <12mo customers. |
+| `distinct_active_months` | INTEGER | 0 | 23 | 1 | 23 | Count of distinct calendar months with any activity before the cutoff (D25). |
+| `distinct_active_days` | INTEGER | 0 | 163 | 1 | 258 | Count of distinct calendar days with any activity before the cutoff (D25). |
+| `distinct_products` | INTEGER | 0 | 727 | 0 | 2425 | Count of distinct product stock codes actually purchased (positive product lines) before the cutoff (D25). |
+| `product_line_count` | INTEGER | 0 | 1,277 | 0 | 10827 | Count of positive product invoice lines before the cutoff (D25). |
+| `gross_product_revenue` | DOUBLE | 0 | 29,096 | 0.0 | 554170.4200000002 | Total revenue of positive product lines before the cutoff (returns not netted); the denominator for revenue concentration (D25). |
+| `prior_12m_net_revenue` | DOUBLE | 0 | 12,920 | -1663.0600000000002 | 296658.83 | Net product revenue in the window 24-12 months before the cutoff, i.e. the year before trailing_12m_net_revenue; feeds revenue growth (D25). |
+| `max_invoice_net_revenue` | DOUBLE | 0 | 9,538 | 0.0 | 77183.6 | Largest single non-cancellation invoice's net product revenue before the cutoff; 0 if the customer has no order. Feeds revenue concentration (D25). |
 | `country` | VARCHAR | 0 | 41 | Australia | West Indies | Country on the customer's most recent invoice before the cutoff. |
+
+## `gold.features`
+
+Model-ready feature vector: one row per customer per `as_of_date`, each feature a closed-form per-row transform of the `gold.customer_360` slice (D26). No cross-customer statistics and no forward read, so the same builder serves training and scoring with no skew. Undefined values are NaN, never imputed (D3). Profiled in [features.md](features.md).
+
+**Rows:** 86,045
+
+| Column | Type | Nulls | Distinct | Min | Max | Description |
+|--------|------|-------|----------|-----|-----|-------------|
+| `customer_id` | VARCHAR | 0 | 5,722 | 12346 | 18287 | Customer identifier. |
+| `as_of_date` | DATE | 0 | 21 | 2010-03-01 | 2011-11-01 | Point-in-time cutoff; features use only customer_360 facts as of this date (D18). |
+| `customer_lifetime_orders` | INTEGER | 0 | 184 | 0 | 355 | Total distinct non-cancellation invoices to date. |
+| `order_frequency` | DOUBLE | 0 | 7,525 | 0.0 | 120.0 | Orders per 30 calendar days of tenure; NaN if tenure is 0 days. |
+| `purchase_velocity` | DOUBLE | 0 | 689 | 0.0 | 22.0 | Orders per distinct active month — order cadence while engaged. |
+| `purchase_intensity` | DOUBLE | 0 | 7,361 | 0.0014285714285714286 | 1.0 | Share of tenure days on which the customer was active, in (0,1]. |
+| `average_days_between_orders` | DOUBLE | 31,223 | 5,455 | 0.0 | 687.0 | Mean gap between first and last purchase across orders; NaN for customers with fewer than two orders. |
+| `recency_score` | DOUBLE | 2,015 | 686 | 0.0004189421234483841 | 0.9889503892939223 | exp(-days_since_last_purchase / 90): 1 just after a purchase, decaying to ~0.37 at one churn window; NaN if the customer has never purchased. |
+| `average_order_value` | DOUBLE | 1,467 | 30,005 | -831.5300000000001 | 13280.46 | Net revenue per order; NaN if no orders. May be negative (net of returns). |
+| `revenue_per_active_day` | DOUBLE | 0 | 30,131 | -831.5300000000001 | 39619.5 | Net revenue per distinct active day. |
+| `trailing_12m_average_monthly_revenue` | DOUBLE | 0 | 33,517 | -821.1691666666669 | 26562.611666666664 | Trailing-12-month net revenue divided by 12. |
+| `revenue_growth_ratio` | DOUBLE | 58,131 | 14,464 | -1.0000000000000002 | 6.2263672223280664e+16 | Trailing-12m net revenue over prior-12m net revenue; NaN when the prior year's revenue is not positive. |
+| `revenue_concentration` | DOUBLE | 2,015 | 24,430 | 0.01533468870480068 | 1.0000000000000007 | Largest order's share of gross product revenue, in (0,1]; NaN when the customer has no positive product revenue. |
+| `active_months` | INTEGER | 0 | 23 | 1 | 23 | Count of distinct calendar months with activity. |
+| `product_diversity` | INTEGER | 0 | 727 | 0 | 2425 | Count of distinct product codes purchased. |
+| `average_products_per_order` | DOUBLE | 1,467 | 4,583 | 0.0 | 259.0 | Product lines per order; NaN if no orders. |
+| `cancellation_rate` | DOUBLE | 0 | 698 | 0.0 | 1.0 | Cancellation invoices over all invoices, in [0,1]. |
+| `repeat_purchase_ratio` | DOUBLE | 1,467 | 183 | 0.0 | 0.9971830985915493 | Share of orders beyond the first, (order_count-1)/order_count; NaN if no orders. |
+| `customer_age_days` | INTEGER | 0 | 689 | 1 | 700 | Days from first activity to the cutoff (= tenure). |
+| `days_since_last_purchase` | DOUBLE | 2,015 | 686 | 1.0 | 700.0 | Days from the last product purchase to the cutoff; NaN if the customer has never purchased. |
 
 ## `gold.labels`
 

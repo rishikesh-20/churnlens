@@ -114,6 +114,16 @@ class Customer360(pa.DataFrameModel):
     trailing_12m_net_revenue: Series[float]
     cancelled_revenue: Series[float] = pa.Field(le=0)
     run_rate_90d: Series[float]
+    # Engagement / window base facts feeding Phase 6 features (D25).
+    distinct_active_months: Series[int] = pa.Field(ge=0)
+    distinct_active_days: Series[int] = pa.Field(ge=0)
+    distinct_products: Series[int] = pa.Field(ge=0)
+    product_line_count: Series[int] = pa.Field(ge=0)
+    # Gross revenue of positive product lines (no returns netted); concentration denominator.
+    gross_product_revenue: Series[float] = pa.Field(ge=0)
+    prior_12m_net_revenue: Series[float]
+    # Largest single order's net product revenue; 0 for customers with no order.
+    max_invoice_net_revenue: Series[float] = pa.Field(ge=0)
     country: Series[str]
 
     class Config:
@@ -127,6 +137,20 @@ class Customer360(pa.DataFrameModel):
     @pa.dataframe_check(error="first_purchase_date must not exceed last_activity_date")
     def first_before_last_activity(cls, df: pd.DataFrame) -> Series[bool]:
         return cast("Series[bool]", df["first_purchase_date"] <= df["last_activity_date"])
+
+    @pa.dataframe_check(error="distinct_active_months must not exceed distinct_active_days")
+    def months_within_days(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast("Series[bool]", df["distinct_active_months"] <= df["distinct_active_days"])
+
+    @pa.dataframe_check(error="distinct_products must not exceed product_line_count")
+    def products_within_lines(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast("Series[bool]", df["distinct_products"] <= df["product_line_count"])
+
+    @pa.dataframe_check(error="max_invoice_net_revenue must not exceed gross_product_revenue")
+    def max_invoice_within_gross(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast(
+            "Series[bool]", df["max_invoice_net_revenue"] <= df["gross_product_revenue"] + 1e-9
+        )
 
 
 class Labels(pa.DataFrameModel):
@@ -163,3 +187,70 @@ class Labels(pa.DataFrameModel):
     def next_purchase_within_window(cls, df: pd.DataFrame) -> Series[bool]:
         within = df["next_purchase_date"] >= df["snapshot_date"]
         return cast("Series[bool]", within | df["next_purchase_date"].isna())
+
+
+class Features(pa.DataFrameModel):
+    """Output contract for ``gold.features``: one model-input row per customer (D26).
+
+    Every feature is a closed-form, per-row function of that customer's
+    ``gold.customer_360`` slice — no cross-customer statistics — so the same
+    builder yields identical values at training and scoring time (no skew).
+    Undefined values (one-time buyers, zero/negative denominators, customers
+    with no purchase yet) are NaN, never imputed; the affected ratio/score
+    features are therefore nullable. Validated per ``as_of_date`` slice, so
+    ``customer_id`` is unique here.
+    """
+
+    customer_id: Series[str] = pa.Field(str_matches=CUSTOMER_ID_PATTERN, unique=True)
+    as_of_date: Series[pa.DateTime]
+    # Behavior
+    customer_lifetime_orders: Series[int] = pa.Field(ge=0)
+    order_frequency: Series[float] = pa.Field(nullable=True, ge=0)
+    purchase_velocity: Series[float] = pa.Field(nullable=True, ge=0)
+    purchase_intensity: Series[float] = pa.Field(nullable=True, ge=0, le=1)
+    average_days_between_orders: Series[float] = pa.Field(nullable=True, ge=0)
+    recency_score: Series[float] = pa.Field(nullable=True, ge=0, le=1)
+    # Revenue (net of returns, so monetary features may be negative — left unconstrained)
+    average_order_value: Series[float] = pa.Field(nullable=True)
+    revenue_per_active_day: Series[float]
+    trailing_12m_average_monthly_revenue: Series[float]
+    revenue_growth_ratio: Series[float] = pa.Field(nullable=True)
+    # Largest order over gross product revenue, in (0,1]; NaN if no positive product revenue.
+    # Upper bound is a tolerant frame check (float rounding lets a single-order customer's
+    # ratio land at 1 + 1 ulp), not a strict Field le.
+    revenue_concentration: Series[float] = pa.Field(nullable=True, ge=0)
+    # Engagement
+    active_months: Series[int] = pa.Field(ge=0)
+    product_diversity: Series[int] = pa.Field(ge=0)
+    average_products_per_order: Series[float] = pa.Field(nullable=True, ge=0)
+    cancellation_rate: Series[float] = pa.Field(nullable=True, ge=0, le=1)
+    repeat_purchase_ratio: Series[float] = pa.Field(nullable=True, ge=0, le=1)
+    # Time
+    customer_age_days: Series[int] = pa.Field(ge=0)
+    days_since_last_purchase: Series[float] = pa.Field(nullable=True, ge=0)
+
+    class Config:
+        strict = True
+        coerce = True
+
+    @pa.dataframe_check(error="recency_score is null exactly when days_since_last_purchase is")
+    def recency_features_share_nullity(cls, df: pd.DataFrame) -> Series[bool]:
+        return cast(
+            "Series[bool]",
+            df["recency_score"].isna() == df["days_since_last_purchase"].isna(),
+        )
+
+    @pa.dataframe_check(error="revenue_concentration must not exceed 1")
+    def concentration_at_most_one(cls, df: pd.DataFrame) -> Series[bool]:
+        within = df["revenue_concentration"] <= 1 + 1e-9
+        return cast("Series[bool]", within | df["revenue_concentration"].isna())
+
+    @pa.dataframe_check(error="order-dependent features are null exactly when there are no orders")
+    def order_features_null_iff_no_orders(cls, df: pd.DataFrame) -> Series[bool]:
+        no_orders = df["customer_lifetime_orders"] == 0
+        undefined = (
+            df["average_order_value"].isna()
+            & df["repeat_purchase_ratio"].isna()
+            & df["average_products_per_order"].isna()
+        )
+        return cast("Series[bool]", undefined == no_orders)

@@ -45,6 +45,13 @@ _TABLE_DESCRIPTIONS = {
         "window is the only deliberate look-ahead — target only, never features. Profiled "
         "in [labels.md](labels.md)."
     ),
+    "gold.features": (
+        "Model-ready feature vector: one row per customer per `as_of_date`, each feature a "
+        "closed-form per-row transform of the `gold.customer_360` slice (D26). No "
+        "cross-customer statistics and no forward read, so the same builder serves training "
+        "and scoring with no skew. Undefined values are NaN, never imputed (D3). Profiled in "
+        "[features.md](features.md)."
+    ),
 }
 
 _SHARED_COLUMNS = {
@@ -93,6 +100,20 @@ _COLUMN_DESCRIPTIONS = {
         "cancelled_revenue": "Net revenue of cancellation lines in GBP (≤ 0).",
         "run_rate_90d": "Expected 90-day net revenue (D6): trailing-12m scaled by 90/365, or "
         "a full-history rate floored at the churn window for <12mo customers.",
+        "distinct_active_months": "Count of distinct calendar months with any activity before "
+        "the cutoff (D25).",
+        "distinct_active_days": "Count of distinct calendar days with any activity before the "
+        "cutoff (D25).",
+        "distinct_products": "Count of distinct product stock codes actually purchased "
+        "(positive product lines) before the cutoff (D25).",
+        "product_line_count": "Count of positive product invoice lines before the cutoff (D25).",
+        "gross_product_revenue": "Total revenue of positive product lines before the cutoff "
+        "(returns not netted); the denominator for revenue concentration (D25).",
+        "prior_12m_net_revenue": "Net product revenue in the window 24-12 months before the "
+        "cutoff, i.e. the year before trailing_12m_net_revenue; feeds revenue growth (D25).",
+        "max_invoice_net_revenue": "Largest single non-cancellation invoice's net product "
+        "revenue before the cutoff; 0 if the customer has no order. Feeds revenue "
+        "concentration (D25).",
         "country": "Country on the customer's most recent invoice before the cutoff.",
     },
     "gold.labels": {
@@ -104,6 +125,36 @@ _COLUMN_DESCRIPTIONS = {
         "no purchase was seen, so the outcome is unknowable (D4).",
         "next_purchase_date": "Date of the first product purchase in the window; null unless "
         "churned = 0.",
+    },
+    "gold.features": {
+        "customer_id": "Customer identifier.",
+        "as_of_date": "Point-in-time cutoff; features use only customer_360 facts as of this "
+        "date (D18).",
+        "customer_lifetime_orders": "Total distinct non-cancellation invoices to date.",
+        "order_frequency": "Orders per 30 calendar days of tenure; NaN if tenure is 0 days.",
+        "purchase_velocity": "Orders per distinct active month — order cadence while engaged.",
+        "purchase_intensity": "Share of tenure days on which the customer was active, in (0,1].",
+        "average_days_between_orders": "Mean gap between first and last purchase across orders; "
+        "NaN for customers with fewer than two orders.",
+        "recency_score": "exp(-days_since_last_purchase / 90): 1 just after a purchase, decaying "
+        "to ~0.37 at one churn window; NaN if the customer has never purchased.",
+        "average_order_value": "Net revenue per order; NaN if no orders. May be negative (net of "
+        "returns).",
+        "revenue_per_active_day": "Net revenue per distinct active day.",
+        "trailing_12m_average_monthly_revenue": "Trailing-12-month net revenue divided by 12.",
+        "revenue_growth_ratio": "Trailing-12m net revenue over prior-12m net revenue; NaN when "
+        "the prior year's revenue is not positive.",
+        "revenue_concentration": "Largest order's share of gross product revenue, in (0,1]; NaN "
+        "when the customer has no positive product revenue.",
+        "active_months": "Count of distinct calendar months with activity.",
+        "product_diversity": "Count of distinct product codes purchased.",
+        "average_products_per_order": "Product lines per order; NaN if no orders.",
+        "cancellation_rate": "Cancellation invoices over all invoices, in [0,1].",
+        "repeat_purchase_ratio": "Share of orders beyond the first, (order_count-1)/order_count; "
+        "NaN if no orders.",
+        "customer_age_days": "Days from first activity to the cutoff (= tenure).",
+        "days_since_last_purchase": "Days from the last product purchase to the cutoff; NaN if "
+        "the customer has never purchased.",
     },
 }
 

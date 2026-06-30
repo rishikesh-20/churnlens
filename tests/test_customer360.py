@@ -157,6 +157,38 @@ def test_cancellation_only_customer(settings):
     assert run_rate == pytest.approx(-15.0)  # -15 / max(61, 90) * 90
 
 
+def base_facts(settings, customer_id, as_of=AS_OF):
+    rows = query(
+        settings,
+        f"""
+        SELECT distinct_active_months, distinct_active_days, distinct_products,
+               product_line_count, gross_product_revenue, prior_12m_net_revenue,
+               max_invoice_net_revenue
+        FROM {GOLD_TABLE} WHERE customer_id = ? AND as_of_date = ?
+        """,
+        [customer_id, as_of],
+    )
+    return rows[0] if rows else None
+
+
+def test_base_facts_for_features(settings):
+    # The D25 base facts that power Phase 6. As of 2011-06-01:
+    #   11111: purchases 2010-01-15 (85123) + 2011-05-01 (85124), POST 2011-05-15.
+    #          prior-12m window [2009-06-01, 2010-06-01) catches only the 2010-01-15 line (20).
+    build_customer_360(settings, AS_OF)
+    months, days, products, lines, gross, prior, max_inv = base_facts(settings, "11111")
+    assert (months, days) == (2, 3)  # 2010-01 + 2011-05 ; three distinct days
+    assert (products, lines) == (2, 2)  # POST is neither a product nor a product line
+    assert gross == pytest.approx(40.0)  # 20 + 20 positive product lines (no returns)
+    assert prior == pytest.approx(20.0)
+    assert max_inv == pytest.approx(20.0)
+
+    # Cancellation-only customer: no products, no order, max invoice revenue floored to 0.
+    months, days, products, lines, gross, prior, max_inv = base_facts(settings, "33333")
+    assert (months, days, products, lines) == (1, 1, 0, 0)
+    assert (gross, prior, max_inv) == pytest.approx((0.0, 0.0, 0.0))
+
+
 def test_point_in_time_metrics_change_with_as_of(settings):
     build_customer_360(settings, "2011-05-10")  # before 22222's only purchase
     assert customer_row(settings, "22222", "2011-05-10") is None
